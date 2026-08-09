@@ -21,9 +21,9 @@ os.environ['https_proxy'] = ''
 # ==============================================================================
 # 1. ОСНОВНЫЕ НАСТРОЙКИ | ТОКЕНЫ И НАСТРОЙКА ОПЕЧАТОК
 # ==============================================================================
-USER_TOKEN = 'vk1.a.oFNBUXjpJ3pMsEZqN9JpjutXmcS9bKuZGvjLAU9fn41sZ74MooKqbIHchrWn_voYIewqrD0jJPqQHaFrW5qdgd-too1-04zft-THOsOd8nGCJDAZoDmMyyPVkFA_IBPde9xjlqYOpMYVNPeU5tFJM3Y1JhuklyIx7289oFgsEJ8-BqQyzdq-9HjvB61c9L5M'
-GROUP_TOKEN = 'vk1.a.RTKpaUP2VQ6HqXsPizxaPTZctNSxwpWzT4TI3z6m-svAPQQ4A2zgLzKmN50siDlqyD3g-foWQZDpwTJdk0VllMrYKbIowiYl3xfxtO4de7BDgUJZQ_QWEgGU4rgZCR1L0bJQ8FoSGTRx1M2VWLtMgTDzomQzfxejkZCxPKVhbW4HGTmURMJ4yZsgjuXwpdTjjjPnuC984bvc_asM62hCcw'
-GROUP_ID = 216111208
+USER_TOKEN = os.environ.get('VK_USER_TOKEN', 'vk1.a.oFNBUXjpJ3pMsEZqN9JpjutXmcS9bKuZGvjLAU9fn41sZ74MooKqbIHchrWn_voYIewqrD0jJPqQHaFrW5qdgd-too1-04zft-THOsOd8nGCJDAZoDmMyyPVkFA_IBPde9xjlqYOpMYVNPeU5tFJM3Y1JhuklyIx7289oFgsEJ8-BqQyzdq-9HjvB61c9L5M')
+GROUP_TOKEN = os.environ.get('VK_GROUP_TOKEN', 'vk1.a.RTKpaUP2VQ6HqXsPizxaPTZctNSxwpWzT4TI3z6m-svAPQQ4A2zgLzKmN50siDlqyD3g-foWQZDpwTJdk0VllMrYKbIowiYl3xfxtO4de7BDgUJZQ_QWEgGU4rgZCR1L0bJQ8FoSGTRx1M2VWLtMgTDzomQzfxejkZCxPKVhbW4HGTmURMJ4yZsgjuXwpdTjjjPnuC984bvc_asM62hCcw')
+GROUP_ID = int(os.environ.get('VK_GROUP_ID', 216111208))
 MAX_TYPO_DISTANCE = 2 # Максимальное количество опечаток (редакторское расстояние)
 
 # ==============================================================================
@@ -109,13 +109,13 @@ def log_action(message, log_file='bot_log.txt'):
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     log_entry = f"{timestamp} {message}"
     
-    print(log_entry)
+    print(log_entry, flush=True)
     
     try:
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(log_entry + '\n')
     except Exception as e:
-        print(f"[ОШИБКА ЗАПИСИ ЛОГА] {e}")
+        print(f"[ОШИБКА ЗАПИСИ ЛОГА] {e}", flush=True)
 
 # ==============================================================================
 # 5. ОСНОВНОЙ ЦИКЛ РАБОТЫ БОТА
@@ -224,7 +224,7 @@ def home():
     return "Bot is running 24/7!"
 
 def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -
