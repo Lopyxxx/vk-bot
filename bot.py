@@ -11,7 +11,6 @@ from flask import Flask, cli
 
 # ==============================================================================
 # 0. ОТКЛЮЧЕНИЕ СИСТЕМНЫХ ПРОКСИ
-# Сбрасывание переменных окружения для избежания ошибок с прокси-серверами
 # ==============================================================================
 os.environ['HTTP_PROXY'] = ''
 os.environ['HTTPS_PROXY'] = ''
@@ -19,18 +18,34 @@ os.environ['http_proxy'] = ''
 os.environ['https_proxy'] = ''
 
 # ==============================================================================
-# 1. ОСНОВНЫЕ НАСТРОЙКИ | ТОКЕНЫ И НАСТРОЙКА ОПЕЧАТОК
+# 1. ОСНОВНЫЕ НАСТРОЙКИ | ТОКЕНЫ И КЭШ
 # ==============================================================================
-USER_TOKEN = os.environ.get('VK_USER_TOKEN', 'vk1.a.oFNBUXjpJ3pMsEZqN9JpjutXmcS9bKuZGvjLAU9fn41sZ74MooKqbIHchrWn_voYIewqrD0jJPqQHaFrW5qdgd-too1-04zft-THOsOd8nGCJDAZoDmMyyPVkFA_IBPde9xjlqYOpMYVNPeU5tFJM3Y1JhuklyIx7289oFgsEJ8-BqQyzdq-9HjvB61c9L5M')
-GROUP_TOKEN = os.environ.get('VK_GROUP_TOKEN', 'vk1.a.RTKpaUP2VQ6HqXsPizxaPTZctNSxwpWzT4TI3z6m-svAPQQ4A2zgLzKmN50siDlqyD3g-foWQZDpwTJdk0VllMrYKbIowiYl3xfxtO4de7BDgUJZQ_QWEgGU4rgZCR1L0bJQ8FoSGTRx1M2VWLtMgTDzomQzfxejkZCxPKVhbW4HGTmURMJ4yZsgjuXwpdTjjjPnuC984bvc_asM62hCcw')
+USER_TOKEN = os.environ.get('VK_USER_TOKEN')
+GROUP_TOKEN = os.environ.get('VK_GROUP_TOKEN')
 GROUP_ID = int(os.environ.get('VK_GROUP_ID', 216111208))
-MAX_TYPO_DISTANCE = 2 # Максимальное количество опечаток (редакторское расстояние)
+
+# Кэш слов и корней в ОЗУ (без чтения диска)
+CACHED_KEYWORDS = []
+CACHED_STEMS = set()
 
 # ==============================================================================
-# 2. ФУНКЦИИ ЧТЕНИЯ ВНЕШНИХ ФАЙЛОВ
+# 2. ПРОСТАЯ ФУНКЦИЯ ПОИСКА КОРНЯ (СТЕММИНГ ДЛЯ РУССКОГО ЯЗЫКА)
+# ==============================================================================
+def get_stem(word):
+    # Отрезание окончаний для поиска корня
+    word = word.lower()
+    if len(word) <= 3:
+        return word
+    rx = r'(иями|ями|ами|его|ого|ему|ому|их|ых|ею|ою|ем|ом|их|ых|ую|юю|ая|яя|ое|ее|ые|ие|ых|их|ий|ый|ой|ем|им|ым|ом|его|ого|ему|ому|а|е|и|о|у|ы|э|ю|я|ь|й)$'
+    stem = re.sub(rx, '', word)
+    return stem if len(stem) >= 3 else word
+
+# ==============================================================================
+# 3. ФУНКЦИИ ЧТЕНИЯ ВНЕШНИХ ФАЙЛОВ И КЭШИРОВАНИЯ
 # ==============================================================================
 def load_keywords(filepath='keywords.txt'):
     # Загрузка списка триггерных слов из файла keywords.txt
+    global CACHED_KEYWORDS, CACHED_STEMS
     if not os.path.exists(filepath):
         print(f"[ОШИБКА] Файл со словами {filepath} не найден!")
         return [], set()
@@ -38,9 +53,14 @@ def load_keywords(filepath='keywords.txt'):
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    # Разбивание текста по запятым и переносам строк с удалением лишних пробелов
     words = [word.strip().lower() for word in re.split(r'[,\n]+', content) if word.strip()]
-    return words, set(words)
+    # Автоматическое извлечение корней из всех загруженных ключевых слов
+    stems = {get_stem(w) for w in words}
+
+    # Сохранение слов и их корней в оперативно доступный кэш    
+    CACHED_KEYWORDS = words
+    CACHED_STEMS = stems
+    return words, stems
 
 def load_reply_text(filepath='reply.txt'):
     # Загрузка текста автоответа из файла reply.txt
@@ -52,68 +72,44 @@ def load_reply_text(filepath='reply.txt'):
         return f.read().strip()
 
 # ==============================================================================
-# 3. АЛГОРИТМ ПРОВЕРКИ ТЕКСТА И ПОИСКА ОПЕЧАТОК
+# 4. АЛГОРИТМ ПРОВЕРКИ ТЕКСТА (БЫСТРЫЙ И ТОЧНЫЙ ПОИСК ПО КОРНЯМ)
 # ==============================================================================
-def levenshtein_distance(s1, s2):
-    """ Вычисление расстояния Левенштейна | количества различий между строками"""
-    if len(s1) < len(s2):
-        return levenshtein_distance(s2, s1)
-    if len(s2) == 0:
-        return len(s1)
-
-    previous_row = range(len(s2) + 1)
-    for i, c1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-    return previous_row[-1]
-
 def check_post_for_triggers(text):
-    # Проверка текста предложенного поста на наличие триггерных слов
-    keywords_list, keywords_set = load_keywords()
-    
-    if not keywords_list:
+    # Первичная инициализация кэша при первом обращении к функции
+    if not CACHED_STEMS:
+        load_keywords()
+        
+    if not CACHED_STEMS:
         return False, None
 
-    # Извлечение отдельных слов из текста
+    # Извлечение отдельных слов из предложенного поста
     words_in_post = re.findall(r'\b\w+\b', text.lower())
-    words_set = set(words_in_post)
     
-    # Быстрая проверка на точное совпадение
-    exact_matches = words_set & keywords_set
-    if exact_matches:
-        matched_word = list(exact_matches)[0]
-        return True, matched_word
-                
+    for word in words_in_post:
+        # Выделение корня у текущего слова из текста поста
+        word_stem = get_stem(word)
+
+        # Точная проверка: совпадает ли корень слова с корнями триггерных слов
+        if word_stem in CACHED_STEMS or word in CACHED_KEYWORDS:
+            return True, word
+
     return False, None
 
 # ==============================================================================
-# 4. ЛОГИРОВАНИЕ ДЕЙСТВИЙ БОТА
+# 5. ЛОГИРОВАНИЕ ДЕЙСТВИЙ БОТА
 # ==============================================================================
-def log_action(message, log_file='bot_log.txt'):
-    # Запись события с временной меткой в консоль и файл bot_log.txt
+def log_action(message):
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    log_entry = f"{timestamp} {message}"
-    
-    print(log_entry, flush=True)
-    
-    try:
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(log_entry + '\n')
-    except Exception as e:
-        print(f"[ОШИБКА ЗАПИСИ ЛОГА] {e}", flush=True)
+    print(f"{timestamp} {message}", flush=True)
 
 # ==============================================================================
-# 5. ОСНОВНОЙ ЦИКЛ РАБОТЫ БОТА
+# 6. ОСНОВНОЙ ЦИКЛ РАБОТЫ БОТА
 # ==============================================================================
 def main():
     # Запуск веб-сервера в отдельном фоновом потоке
     threading.Thread(target=run_web_server, daemon=True).start()
 
+    # Загрузка и первичная обработка триггеров в ОЗУ перед запуском прослушивания
     initial_words, _ = load_keywords()
     log_action("==================================/")
     log_action("Бот запущен и отслеживает записи /")
@@ -141,8 +137,7 @@ def main():
                 duration = int((datetime.now() - disconnect_start_time).total_seconds())
                 minutes, seconds = divmod(duration, 60)
                 time_str = f"{minutes} мин {seconds} сек" if minutes > 0 else f"{seconds} сек"
-                
-                # Перенос строки после перетираемого вывода в консоли
+
                 print() 
                 log_action(f"[СВЯЗЬ ВОССТАНОВЛЕНА] Время простоя: {time_str} (Попыток: {retry_count})")
                 
@@ -155,7 +150,7 @@ def main():
                 if event.type == VkBotEventType.WALL_POST_NEW:
                     obj = event.object
                     post = obj.get('post') if isinstance(obj, dict) and 'post' in obj else obj
-                    
+
                     # Фильтрация предложенных новостей
                     if isinstance(post, dict) and post.get('post_type') == 'suggest':
                         post_text = post.get('text', '')
@@ -179,7 +174,7 @@ def main():
                                     log_action(f"[ОШИБКА VK] Не удалось отправить id{author_id}: {e}")
                                 except Exception as e:
                                     log_action(f"[ОШИБКА] Сбой при отправке id{author_id}: {e}")
-                                
+
                                 # Задержка для защиты от блокировок VK за спам
                                 delay = round(random.uniform(2.5, 4.5), 2)
                                 time.sleep(delay)
@@ -191,16 +186,13 @@ def main():
                 err_msg = str(e).split('(')[0].strip() or type(e).__name__
                 log_action(f"[СБОЙ СЕТИ/VK] Потеряно соединение ({err_msg}). Ожидание сети...")
 
-            retry_count += 1
-            
             # Динамическое обновление строки в консоли без засорения файла
-            timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-            print(f"\r{timestamp} [ПОВТОР #{retry_count}] Попытка переподключения через 5 сек...", end="", flush=True)
-            
+            retry_count += 1
+            log_action(f"[ПОВТОР #{retry_count}] Попытка переподключения через 5 сек...")
             time.sleep(5)
 
 # ==============================================================================
-# 6. ВЕБ-СЕРВЕР ДЛЯ ПОДДЕРЖКИ АКТИВНОСТИ (KEEP-ALIVE / HEALTH CHECK)
+# 7. ВЕБ-СЕРВЕР ДЛЯ ПОДДЕРЖКИ АКТИВНОСТИ
 # ==============================================================================
 app = Flask(__name__)
 
@@ -217,6 +209,6 @@ def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 if __name__ == '__main__':
     main()
