@@ -73,7 +73,7 @@ def levenshtein_distance(s1, s2):
     return previous_row[-1]
 
 def check_post_for_triggers(text):
-    # Проверка текста предложенного поста на наличие триггерных слов и опечаток
+    # Проверка текста предложенного поста на наличие триггерных слов
     keywords_list, keywords_set = load_keywords()
     
     if not keywords_list:
@@ -83,21 +83,11 @@ def check_post_for_triggers(text):
     words_in_post = re.findall(r'\b\w+\b', text.lower())
     words_set = set(words_in_post)
     
-    # 1. Быстрая проверка на точное совпадение
+    # Быстрая проверка на точное совпадение
     exact_matches = words_set & keywords_set
     if exact_matches:
         matched_word = list(exact_matches)[0]
         return True, matched_word
-
-    # 2. Проверка с учётом опечаток (нечеткий поиск)
-    for word in words_in_post:
-        if len(word) < 4:
-            continue
-            
-        for keyword in keywords_list:
-            if len(keyword) >= 4 and abs(len(word) - len(keyword)) <= MAX_TYPO_DISTANCE:
-                if levenshtein_distance(word, keyword) <= MAX_TYPO_DISTANCE:
-                    return True, f"{keyword} (найдено как: '{word}')"
                 
     return False, None
 
