@@ -163,20 +163,36 @@ def main():
                             
                             if author_id and author_id > 0:
                                 try:
-                                    # Отправка ответа автору поста
+                                    # Отправка ответа автору поста с УНИКАЛЬНЫМ random_id
                                     vk_user.messages.send(
                                         user_id=author_id,
                                         message=current_reply_text,
-                                        random_id=0
+                                        random_id=random.randint(1, 2147483647)
                                     )
                                     log_action(f"[ОК] Триггер '{matched_keyword}'. Отправлено id{author_id}")
+
                                 except vk_api.exceptions.ApiError as e:
-                                    log_action(f"[ОШИБКА VK] Не удалось отправить id{author_id}: {e}")
+                                    if e.code == 9:  # Обработка ошибки Flood control
+                                        log_action(f"[VK LIMIT] Флуд-контроль для id{author_id}. Пауза 5 сек...")
+                                        time.sleep(5)
+                                        try:
+                                            # Повторная попытка
+                                            vk_user.messages.send(
+                                                user_id=author_id,
+                                                message=current_reply_text,
+                                                random_id=random.randint(1, 2147483647)
+                                            )
+                                            log_action(f"[ОК] Повторно отправлено id{author_id}")
+                                        except Exception as retry_e:
+                                            log_action(f"[ОШИБКА VK] Повторный сбой id{author_id}: {retry_e}")
+                                    else:
+                                        log_action(f"[ОШИБКА VK] Не удалось отправить id{author_id}: {e}")
+
                                 except Exception as e:
                                     log_action(f"[ОШИБКА] Сбой при отправке id{author_id}: {e}")
 
                                 # Задержка для защиты от блокировок VK за спам
-                                delay = round(random.uniform(2.5, 4.5), 2)
+                                delay = round(random.uniform(3.0, 5.0), 2)
                                 time.sleep(delay)
                                 
         except Exception as e:
@@ -212,3 +228,4 @@ def run_web_server():
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 if __name__ == '__main__':
     main()
+    
